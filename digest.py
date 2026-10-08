@@ -207,8 +207,11 @@ def send_to_bark(title, body):
 
 
 def main():
-    today_str = datetime.now().strftime("%m月%d日")
-    title = f"📰 今日早报：全球财经时政 & 吃瓜速递 ({today_str})"
+    # 适配北京时间判断早晚版
+    now = datetime.now()
+    today_str = now.strftime("%m月%d日")
+    period = "早报" if now.hour < 12 else "下午版"
+    title = f"📰 今日{period}：全球时政财经 & 吃瓜速递 ({today_str})"
 
     logging.info("开始多源抓取 BBC、纽时、全球财经与娱乐八卦...")
     news_data = fetch_news()
