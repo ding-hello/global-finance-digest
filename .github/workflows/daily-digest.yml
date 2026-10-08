@@ -1,0 +1,36 @@
+name: Daily Global Finance Digest
+
+on:
+  schedule:
+    # 每天 UTC 00:00 (北京时间早上 08:00) 自动触发
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 支持在 GitHub 网页上手动点击按钮一键测试
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+
+      - name: 执行抓取、提炼并推送到 iPhone Bark
+        env:
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+          BARK_SERVER: ${{ secrets.BARK_SERVER || 'https://api.day.app' }}
+          # 可选：如果配置了 AI API Key，会自动使用大模型进行深度提炼
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          MODEL_NAME: ${{ secrets.MODEL_NAME }}
+        run: |
+          python digest.py
