@@ -2,8 +2,10 @@ name: Daily Global Finance Digest
 
 on:
   schedule:
-    # 每天 UTC 00:00 (北京时间早上 08:00) 自动触发
-    - cron: '0 0 * * *'
+    # 早上 07:30 (北京时间 UTC+8 -> 对应 UTC 23:30)
+    - cron: '30 23 * * *'
+    # 下午 16:00 (北京时间 UTC+8 -> 对应 UTC 08:00)
+    - cron: '0 8 * * *'
   workflow_dispatch: # 支持在 GitHub 网页上手动点击按钮一键测试
 
 jobs:
@@ -25,6 +27,7 @@ jobs:
 
       - name: 执行抓取、提炼并推送到 iPhone Bark
         env:
+          TZ: 'Asia/Shanghai'
           BARK_KEY: ${{ secrets.BARK_KEY }}
           BARK_SERVER: ${{ secrets.BARK_SERVER || 'https://api.day.app' }}
           # 可选：如果配置了 AI API Key，会自动使用大模型进行深度提炼
