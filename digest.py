@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 全球财经与综合热点深度早报推送脚本
-- 深度覆盖：BBC、纽约时报 (The New York Times)、华尔街日报、全球权威财经与头条
+- 深度覆盖：BBC、纽约时报、华尔街日报、全球权威财经与头条
+- 新增：华语/好莱坞娱乐八卦与吃瓜猛料速递
 - 提取新闻完整摘要（导语/背景），提供更详尽的深度信息
 - 支持大模型 (Gemini / OpenAI / DeepSeek) 智能深度提炼与脉络剖析
 - 通过 Bark 推送到 iPhone 锁屏弹窗
@@ -18,7 +19,7 @@ import requests
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# 优质公开新闻 RSS 源（重点覆盖 BBC、纽约时报、全球财经与综合热点）
+# 优质公开新闻 RSS 源（覆盖 BBC、纽时、宏观财经、综合头条、以及娱乐吃瓜八卦）
 FEEDS = {
     "BBC / 纽约时报 国际热点": [
         {"name": "BBC 中文", "url": "https://www.bbc.com/zhongwen/simp/index.xml"},
@@ -34,6 +35,11 @@ FEEDS = {
     "全球综合焦点头条": [
         {"name": "全球头条(中文)", "url": "https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
         {"name": "全球头条(国际)", "url": "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"},
+    ],
+    "吃瓜娱乐 / 明星八卦": [
+        {"name": "华语吃瓜/星闻", "url": "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=zh-TW&gl=TW&ceid=TW:zh-Hant"},
+        {"name": "内娱焦点", "url": "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"},
+        {"name": "好莱坞/国际名流", "url": "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-US&gl=US&ceid=US:en"},
     ]
 }
 
@@ -64,9 +70,7 @@ def fetch_news(max_per_feed=3):
                     summary = clean_html(entry.get("summary") or entry.get("description") or "")
                     link = entry.get("link", "")
 
-                    # 简单去重
                     if title and not any(t["title"] == title for t in items):
-                        # 过滤无意义的超短摘要
                         if len(summary) > 200:
                             summary = summary[:200] + "..."
                         items.append({
@@ -96,25 +100,28 @@ def generate_detailed_summary(news_data):
             if item["summary"]:
                 raw_text += f"   详情导读: {item['summary']}\n"
 
-    prompt = f"""你是一名资深国际政治与宏观经济主笔。请根据以下今日抓取的 BBC、纽约时报、全球财经与头条新闻，提炼出一份【内容详尽、富有深度】的 iPhone 晨报。
+    prompt = f"""你是一名资深主笔与全网资讯观察员。请根据以下今日抓取的 BBC、纽约时报、全球财经、国际头条与娱乐八卦，提炼出一份【兼具深度与趣味】的 iPhone 晨报。
 
-用户希望看到详尽具体的事实与背景，请拒绝空洞概括，严格按照以下模块排版：
+排版模块要求：
 
 📌【BBC & 纽约时报 深度国际要闻】
-• 梳理 2~3 条重点大事件。每条列出：【核心事件】+【事件背景/具体细节与关键数据】+【各方态度或地缘影响】。
+• 梳理 2~3 条重点大事件。包含【核心事件】+【具体细节/关键数据】+【地缘与各方影响】。
 
 📈【全球宏观经济与市场动向】
-• 梳理 2~3 条关键财经动向（美联储/货币政策、大宗商品、股市汇率等）。阐述具体数据变动与市场深层逻辑。
+• 梳理 2~3 条关键财经动向（美联储/央行政策、股市汇率、大宗商品等）。阐明数据与市场深层逻辑。
 
-🌐【综合科技与重磅焦点】
-• 梳理 1~2 条全球热点或科技产业突破事件，阐明核心影响。
+🌐【综合科技与产业焦点】
+• 梳理 1~2 条全球热点或科技突破。
+
+🍿【今日吃瓜·娱乐八卦速递】
+• 梳理 2~3 条今日最具热度的华语及国际娱乐圈猛料、明星名人动态、情感纠葛或热搜吃瓜事件。语言风格生动、风趣幽默。
 
 💡【今日主笔观察】
-• 用 1~2 段话对今日全球大势进行一针见血的总结与前瞻。
+• 1~2 句话点出今日大势或市场前瞻。
 
 排版要求：
-- 条理清晰，使用表情符号（Emoji）增强可读性。
-- 内容要充实、有事实支撑，字数适度扩充至 700~900 字左右，方便在手机屏幕上获得充足信息量。
+- 条理分明，使用 Emoji 标签增强视觉层次。
+- 内容充实有深度，八卦部分轻松风趣，全文约 800~1000 字左右。
 
 原始新闻素材：
 {raw_text}
@@ -123,7 +130,7 @@ def generate_detailed_summary(news_data):
     # 1. 优先调用 Gemini API
     if gemini_key:
         try:
-            logging.info("使用 Gemini API 进行深度要闻提炼...")
+            logging.info("使用 Gemini API 进行深度要闻与八卦提炼...")
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
             payload = {"contents": [{"parts": [{"text": prompt}]}]}
             res = requests.post(url, json=payload, timeout=35)
@@ -138,7 +145,7 @@ def generate_detailed_summary(news_data):
     # 2. 调用 OpenAI 兼容 API (如 DeepSeek / OpenAI)
     if openai_key:
         try:
-            logging.info("使用 OpenAI 兼容 API 进行深度要闻提炼...")
+            logging.info("使用 OpenAI 兼容 API 进行深度提炼...")
             headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
             payload = {
                 "model": model_name,
@@ -154,7 +161,7 @@ def generate_detailed_summary(news_data):
         except Exception as e:
             logging.warning(f"OpenAI API 调用出错: {e}")
 
-    # 3. 兜底备选：无 Key 时的详尽排版（带背景导读）
+    # 3. 兜底备选：无 Key 时的详尽排版
     logging.info("未配置 AI 密钥，采用自带的高密度详尽排版模式")
     lines = []
     for cat, items in news_data.items():
@@ -181,7 +188,7 @@ def send_to_bark(title, body):
     payload = {
         "title": title,
         "body": body,
-        "group": "全球早报·深度速递",
+        "group": "全球早报·时政财经八卦",
         "icon": "https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f4f0.png",
         "sound": "minuet",
         "isArchive": "1"
@@ -201,12 +208,12 @@ def send_to_bark(title, body):
 
 def main():
     today_str = datetime.now().strftime("%m月%d日")
-    title = f"📰 深度早报：BBC/纽时/全球财经 ({today_str})"
+    title = f"📰 今日早报：全球财经时政 & 吃瓜速递 ({today_str})"
 
-    logging.info("开始多源抓取 BBC、纽时、全球财经与焦点新闻...")
+    logging.info("开始多源抓取 BBC、纽时、全球财经与娱乐八卦...")
     news_data = fetch_news()
 
-    logging.info("提炼深度要闻内容...")
+    logging.info("提炼内容...")
     summary = generate_detailed_summary(news_data)
 
     print("\n" + "=" * 45)
