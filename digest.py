@@ -2,11 +2,8 @@
 """
 全球财经与综合热点深度早报推送脚本
 - 深度覆盖：BBC、纽约时报、华尔街日报、全球权威财经、综合头条、娱乐八卦吃瓜
-- 智能去重：严格剔除 RSS 摘要中重复的标题文本与垃圾尾缀，杜绝重复两条问题
-- 全局防重：跨版块事件全局去重
-- 自动适配 iPhone APNs 与 Bark 最佳长度限制
-- 区分早报与下午版，支持大模型深度提炼
-- 通过 Bark 推送到 iPhone 锁屏弹窗
+- 自动生成移动端专属【大字版沉浸式网页】(index.html)，自动发布至 GitHub Pages
+- Bark 推送横幅自带网页跳转链接，点击即以大字号舒适阅读全文
 """
 
 import os
@@ -20,7 +17,9 @@ import requests
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# 优质公开新闻 RSS 源（覆盖 BBC、纽时、宏观财经、综合头条、以及娱乐吃瓜八卦）
+PAGES_URL = "https://ding-hello.github.io/global-finance-digest/"
+
+# 优质公开新闻 RSS 源
 FEEDS = {
     "BBC / 纽约时报 国际深度": [
         {"name": "BBC 中文", "url": "https://www.bbc.com/zhongwen/simp/index.xml"},
@@ -55,33 +54,25 @@ def clean_html(raw_html):
 
 
 def extract_real_summary(title, raw_summary):
-    """
-    智能去重与提纯：
-    从 summary 中剔除重复的标题内容、媒体名和占位符。
-    只有当 summary 包含真正有价值的增量信息时才返回，杜绝'同一句话重复两次'。
-    """
+    """智能提纯摘要，避免重复标题"""
     if not raw_summary:
         return ""
     clean_t = title.split(" - ")[0].strip()
     s = raw_summary
-    # 移除摘要开头重复出现的完整标题
     if clean_t and clean_t in s:
         s = s.replace(clean_t, "").strip()
 
-    # 移除常见的 Google News / RSS 营销导流尾缀
     s = re.sub(r"(前往\s*Google\s*新聞.*|前往\s*Google\s*新闻.*|View Full Coverage on Google News.*)", "", s, flags=re.IGNORECASE).strip()
-    # 移除开头的多余标点与媒体名残留
     s = re.sub(r"^[：:,\-\|\s]+", "", s).strip()
 
-    # 如果剥离标题后，剩余内容太短（少于12个字，说明只是纯媒体后缀或噪音），直接舍弃
     if len(s) < 12:
         return ""
 
-    return s[:75] + "..." if len(s) > 75 else s
+    return s[:120] + "..." if len(s) > 120 else s
 
 
 def fetch_news(max_per_feed=2):
-    """抓取各分类新闻，全局去重，并提纯增量导读"""
+    """抓取各分类新闻并全局去重"""
     collected = {}
     seen_titles = set()
 
@@ -99,11 +90,9 @@ def fetch_news(max_per_feed=2):
                     link = entry.get("link", "")
                     raw_summary = clean_html(entry.get("summary") or entry.get("description") or "")
 
-                    # 全局去重判断（简化标题对比前 12 个字）
                     title_fingerprint = clean_title[:12].lower()
                     if clean_title and title_fingerprint not in seen_titles:
                         seen_titles.add(title_fingerprint)
-                        # 提纯增量摘要
                         real_summary = extract_real_summary(raw_title, raw_summary)
                         items.append({
                             "source": source_name,
@@ -117,72 +106,208 @@ def fetch_news(max_per_feed=2):
     return collected
 
 
-def generate_detailed_summary(news_data):
-    """若配置了大模型 API，进行深度提炼；否则输出干净利落的精美排版"""
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    openai_key = os.getenv("OPENAI_API_KEY")
-    openai_base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    model_name = os.getenv("MODEL_NAME", "gpt-4o-mini")
+def generate_html_page(news_data, date_str, period_str):
+    """生成移动端大字号自适应沉浸阅读网页 (index.html)"""
+    category_meta = {
+        "BBC / 纽约时报 国际深度": {"icon": "📌", "desc": "全球重大地缘时政与深度调查"},
+        "全球财经 / 宏观市场": {"icon": "📈", "desc": "美联储、全球股市、外汇大宗商品"},
+        "全球综合焦点头条": {"icon": "🌐", "desc": "全球科技变革与重磅突发要闻"},
+        "吃瓜娱乐 / 明星八卦": {"icon": "🍿", "desc": "华语及好莱坞一线大瓜与名流八卦"}
+    }
 
-    raw_text = ""
+    cards_html = ""
     for cat, items in news_data.items():
-        raw_text += f"\n=== {cat} ===\n"
-        for idx, item in enumerate(items[:3], 1):
-            raw_text += f"[{item['source']}] {item['title']}\n"
-            if item["summary"]:
-                raw_text += f"   导读: {item['summary']}\n"
+        meta = category_meta.get(cat, {"icon": "🔹", "desc": ""})
+        items_html = ""
+        for item in items[:3]:
+            summary_html = f'<p class="news-summary">{item["summary"]}</p>' if item['summary'] else ""
+            link_html = f'<a href="{item["link"]}" target="_blank" class="news-link">查看原报道 ↗</a>' if item.get('link') else ""
+            items_html += f"""
+            <div class="news-item">
+                <div class="news-meta">
+                    <span class="source-badge">{item['source']}</span>
+                </div>
+                <h3 class="news-title">{item['title']}</h3>
+                {summary_html}
+                {link_html}
+            </div>
+            """
 
-    prompt = f"""你是一名资深全网资讯观察员。请根据今日抓取的 BBC、纽约时报、全球财经、国际头条与娱乐八卦，提炼出一份精炼且有深度的 iPhone 晨报。
+        cards_html += f"""
+        <section class="card">
+            <div class="card-header">
+                <span class="card-icon">{meta['icon']}</span>
+                <div>
+                    <h2>{cat}</h2>
+                    <span class="card-sub">{meta['desc']}</span>
+                </div>
+            </div>
+            <div class="news-list">
+                {items_html}
+            </div>
+        </section>
+        """
 
-严格按照以下模块排版（请使用 Emoji 标签）：
-📌【BBC & 纽约时报 国际深度】（2 条重磅事件与影响）
-📈【全球宏观市场动向】（2 条核心财经指标与逻辑）
-🌐【综合科技与焦点】（1~2 条热点突破）
-🍿【今日吃瓜·娱乐八卦】（2 条明星名流情感纠葛或热搜吃瓜，语言风趣幽默）
-💡【主笔观察】（1 句话点出今日大势）
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>📰 今日{period_str} · 全球时政财经与热点速递</title>
+    <style>
+        :root {{
+            --bg-color: #f7f9fa;
+            --card-bg: #ffffff;
+            --text-main: #1a1a1a;
+            --text-sub: #555555;
+            --text-muted: #888888;
+            --accent: #2563eb;
+            --border-color: #e5e7eb;
+            --badge-bg: #eff6ff;
+            --badge-color: #1d4ed8;
+        }}
+        @media (prefers-color-scheme: dark) {{
+            :root {{
+                --bg-color: #0f172a;
+                --card-bg: #1e293b;
+                --text-main: #f8fafc;
+                --text-sub: #cbd5e1;
+                --text-muted: #94a3b8;
+                --accent: #38bdf8;
+                --border-color: #334155;
+                --badge-bg: #1e3a5f;
+                --badge-color: #7dd3fc;
+            }}
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding: 16px;
+            max-width: 680px;
+            margin: 0 auto;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }}
+        header {{
+            padding: 24px 8px 16px;
+            text-align: left;
+        }}
+        .header-tag {{
+            font-size: 14px;
+            color: var(--accent);
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }}
+        h1 {{
+            font-size: 28px;
+            font-weight: 800;
+            margin: 8px 0;
+            line-height: 1.25;
+        }}
+        .update-time {{
+            font-size: 15px;
+            color: var(--text-muted);
+        }}
+        .card {{
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 20px 18px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+            border: 1px solid var(--border-color);
+        }}
+        .card-header {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding-bottom: 14px;
+            border-bottom: 1.5px solid var(--border-color);
+            margin-bottom: 16px;
+        }}
+        .card-icon {{
+            font-size: 28px;
+        }}
+        .card-header h2 {{
+            font-size: 21px;
+            font-weight: 700;
+        }}
+        .card-sub {{
+            font-size: 13px;
+            color: var(--text-muted);
+            display: block;
+        }}
+        .news-item {{
+            padding: 14px 0;
+            border-bottom: 1px dashed var(--border-color);
+        }}
+        .news-item:last-child {{
+            border-bottom: none;
+            padding-bottom: 0;
+        }}
+        .news-meta {{
+            margin-bottom: 6px;
+        }}
+        .source-badge {{
+            font-size: 12px;
+            font-weight: 600;
+            padding: 3px 8px;
+            background: var(--badge-bg);
+            color: var(--badge-color);
+            border-radius: 6px;
+        }}
+        .news-title {{
+            font-size: 20px;
+            font-weight: 700;
+            line-height: 1.45;
+            color: var(--text-main);
+            margin-bottom: 8px;
+        }}
+        .news-summary {{
+            font-size: 17px;
+            color: var(--text-sub);
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }}
+        .news-link {{
+            font-size: 14px;
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 500;
+            display: inline-block;
+        }}
+        footer {{
+            text-align: center;
+            padding: 28px 0 40px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }}
+    </style>
+</head>
+<body>
+    <header>
+        <span class="header-tag">DAILY INTELLIGENCE</span>
+        <h1>📰 今日{period_str}速递</h1>
+        <div class="update-time">📅 {date_str} · 全球大势与精选吃瓜</div>
+    </header>
 
-字数限制：严格控制在 500~650 字以内，排版清爽，适合手机弹窗速读，杜绝任何重复语句。
+    {cards_html}
 
-原始新闻素材：
-{raw_text}
+    <footer>
+        <p>由 GitHub Actions 云端自动驱动生成 · 点击原报道可阅读深度全文</p>
+    </footer>
+</body>
+</html>
 """
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    logging.info("✅ 成功生成移动端大字号专属网页 index.html")
 
-    # 1. 优先调用 Gemini API
-    if gemini_key:
-        try:
-            logging.info("使用 Gemini API 总结...")
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
-            payload = {"contents": [{"parts": [{"text": prompt}]}]}
-            res = requests.post(url, json=payload, timeout=30)
-            if res.status_code == 200:
-                data = res.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            else:
-                logging.warning(f"Gemini API 响应异常: {res.text}")
-        except Exception as e:
-            logging.warning(f"Gemini API 调用出错: {e}")
 
-    # 2. 调用 OpenAI 兼容 API
-    if openai_key:
-        try:
-            logging.info("使用 OpenAI 兼容 API 总结...")
-            headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
-            payload = {
-                "model": model_name,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.5
-            }
-            res = requests.post(f"{openai_base}/chat/completions", headers=headers, json=payload, timeout=30)
-            if res.status_code == 200:
-                data = res.json()
-                return data["choices"][0]["message"]["content"].strip()
-            else:
-                logging.warning(f"OpenAI API 响应异常: {res.text}")
-        except Exception as e:
-            logging.warning(f"OpenAI API 调用出错: {e}")
-
-    # 3. 兜底精简排版（彻底解决重复两条问题）
-    logging.info("未配置 AI 密钥，采用自带的高密度排版模式")
+def generate_compact_notification_text(news_data):
+    """为手机锁屏横幅生成清爽、字号大、带跳转提示的精炼概览"""
     lines = []
     category_icons = {
         "BBC / 纽约时报 国际深度": "📌",
@@ -192,20 +317,17 @@ def generate_detailed_summary(news_data):
     }
 
     for cat, items in news_data.items():
-        icon = category_icons.get(cat, "🔹")
-        lines.append(f"{icon}【{cat}】")
-        for idx, item in enumerate(items[:2], 1):  # 每个版块精选 2 条
-            lines.append(f"• [{item['source']}] {item['title']}")
-            # 仅当有真正增量背景信息时才附带一行导读
-            if item['summary']:
-                lines.append(f"  ↳ {item['summary']}")
-        lines.append("")
+        if items:
+            icon = category_icons.get(cat, "🔹")
+            first_title = items[0]['title'].split(" - ")[0].strip()
+            lines.append(f"{icon} {first_title}")
 
+    lines.append("\n👉 点击本通知直达大字版网页全文阅读")
     return "\n".join(lines).strip()
 
 
-def send_to_bark(title, body):
-    """通过 Bark 推送到 iPhone 弹窗，带自动长度保护与重试机制"""
+def send_to_bark(title, body, url=PAGES_URL):
+    """通过 Bark 推送到 iPhone，支持点击打开大字版网页"""
     bark_key = os.getenv("BARK_KEY")
     bark_server = os.getenv("BARK_SERVER", "https://api.day.app")
 
@@ -213,26 +335,22 @@ def send_to_bark(title, body):
         logging.error("未找到 BARK_KEY 环境变量！请在 GitHub Secrets 中配置 BARK_KEY。")
         sys.exit(1)
 
-    # 严格限制长度不超过 900 字符，确保 Apple APNs 与 Nginx 100% 接收（避免 413）
-    if len(body) > 900:
-        logging.info(f"正文长度 {len(body)} 超过 900 字符，自动安全截断以防 APNs 413 拒收")
-        body = body[:890] + "...\n(更多详情见今日新闻)"
-
-    url = f"{bark_server.rstrip('/')}/{bark_key}/"
     payload = {
         "title": title,
         "body": body,
+        "url": url,  # 点击通知直接打开该网页
         "group": "全球早报·时政财经八卦",
         "icon": "https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f4f0.png",
         "sound": "minuet",
         "isArchive": "1"
     }
 
+    post_url = f"{bark_server.rstrip('/')}/{bark_key}/"
     try:
-        logging.info(f"正在推送到 iPhone Bark (正文字数: {len(body)})...")
-        res = requests.post(url, json=payload, timeout=20)
+        logging.info(f"正在推送到 iPhone Bark (携带大字版跳转链接: {url})...")
+        res = requests.post(post_url, json=payload, timeout=20)
         if res.status_code == 200:
-            logging.info("✅ 推送成功！请在 iPhone 查看锁屏弹窗与通知中心。")
+            logging.info("✅ 推送成功！请在 iPhone 查看锁屏弹窗，点击即可进入大字版！")
         else:
             logging.error(f"❌ 推送失败，状态码: {res.status_code}, 内容: {res.text}")
             sys.exit(1)
@@ -250,14 +368,17 @@ def main():
     logging.info("开始多源抓取 BBC、纽时、全球财经与娱乐八卦...")
     news_data = fetch_news()
 
-    logging.info("提炼内容...")
-    summary = generate_detailed_summary(news_data)
+    logging.info("生成手机端大字号专属网页...")
+    generate_html_page(news_data, now.strftime("%Y年%m月%d日"), period)
+
+    logging.info("生成锁屏通知精炼内容...")
+    compact_body = generate_compact_notification_text(news_data)
 
     print("\n" + "=" * 45)
-    print(f"{title}\n\n{summary}")
+    print(f"{title}\n\n{compact_body}")
     print("=" * 45 + "\n")
 
-    send_to_bark(title, summary)
+    send_to_bark(title, compact_body, url=PAGES_URL)
 
 
 if __name__ == "__main__":
