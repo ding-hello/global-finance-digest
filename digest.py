@@ -301,9 +301,10 @@ def generate_html_page(news_data, date_str, period_str):
 </body>
 </html>
 """
-    with open("index.html", "w", encoding="utf-8") as f:
+    os.makedirs("public", exist_ok=True)
+    with open("public/index.html", "w", encoding="utf-8") as f:
         f.write(html)
-    logging.info("✅ 成功生成移动端大字号专属网页 index.html")
+    logging.info("✅ 成功生成移动端大字号专属网页 public/index.html")
 
 
 def generate_compact_notification_text(news_data):
