@@ -9,10 +9,19 @@ on:
   workflow_dispatch: # 支持在 GitHub 网页或 API 手动点击一键测试
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'pages'
+  cancel-in-progress: false
 
 jobs:
   digest:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: 检出代码
@@ -40,11 +49,14 @@ jobs:
         run: |
           python digest.py
 
-      - name: 部署移动端大字版网页至 GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: 配置 GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: 上传网页产物
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
-          destination_dir: ./
-          keep_files: false
-          exclude_assets: '.git,.github,digest.py,requirements.txt,README.md'
+          path: 'public'
+
+      - name: 部署至 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
