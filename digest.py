@@ -2,7 +2,9 @@
 """
 全球财经与综合热点深度早报推送脚本
 - 深度覆盖：BBC、纽约时报、华尔街日报、全球权威财经、综合头条、娱乐八卦吃瓜
-- 自动适配 iPhone APNs 与 Bark 最佳长度限制（严格控制在安全 Payload 范围内）
+- 智能去重：严格剔除 RSS 摘要中重复的标题文本与垃圾尾缀，杜绝重复两条问题
+- 全局防重：跨版块事件全局去重
+- 自动适配 iPhone APNs 与 Bark 最佳长度限制
 - 区分早报与下午版，支持大模型深度提炼
 - 通过 Bark 推送到 iPhone 锁屏弹窗
 """
@@ -43,7 +45,7 @@ FEEDS = {
 
 
 def clean_html(raw_html):
-    """去除 HTML 标签与多余空白，保留纯文本摘要"""
+    """去除 HTML 标签与多余空白，保留纯文本"""
     if not raw_html:
         return ""
     text = re.sub(r"<[^>]+>", "", raw_html)
@@ -52,9 +54,37 @@ def clean_html(raw_html):
     return text
 
 
+def extract_real_summary(title, raw_summary):
+    """
+    智能去重与提纯：
+    从 summary 中剔除重复的标题内容、媒体名和占位符。
+    只有当 summary 包含真正有价值的增量信息时才返回，杜绝'同一句话重复两次'。
+    """
+    if not raw_summary:
+        return ""
+    clean_t = title.split(" - ")[0].strip()
+    s = raw_summary
+    # 移除摘要开头重复出现的完整标题
+    if clean_t and clean_t in s:
+        s = s.replace(clean_t, "").strip()
+
+    # 移除常见的 Google News / RSS 营销导流尾缀
+    s = re.sub(r"(前往\s*Google\s*新聞.*|前往\s*Google\s*新闻.*|View Full Coverage on Google News.*)", "", s, flags=re.IGNORECASE).strip()
+    # 移除开头的多余标点与媒体名残留
+    s = re.sub(r"^[：:,\-\|\s]+", "", s).strip()
+
+    # 如果剥离标题后，剩余内容太短（少于12个字，说明只是纯媒体后缀或噪音），直接舍弃
+    if len(s) < 12:
+        return ""
+
+    return s[:75] + "..." if len(s) > 75 else s
+
+
 def fetch_news(max_per_feed=2):
-    """抓取各分类新闻，包含标题与正文导语摘要"""
+    """抓取各分类新闻，全局去重，并提纯增量导读"""
     collected = {}
+    seen_titles = set()
+
     for cat, feed_list in FEEDS.items():
         items = []
         for feed_info in feed_list:
@@ -64,18 +94,21 @@ def fetch_news(max_per_feed=2):
                 logging.info(f"正在拉取 [{source_name}]: {url}")
                 parsed = feedparser.parse(url)
                 for entry in parsed.entries[:max_per_feed]:
-                    title = entry.get("title", "").strip()
-                    summary = clean_html(entry.get("summary") or entry.get("description") or "")
+                    raw_title = entry.get("title", "").strip()
+                    clean_title = raw_title.split(" - ")[0].strip()
                     link = entry.get("link", "")
+                    raw_summary = clean_html(entry.get("summary") or entry.get("description") or "")
 
-                    if title and not any(t["title"] == title for t in items):
-                        # 精炼导读，控制在 75 字符内，避免总 payload 膨胀超限
-                        if len(summary) > 75:
-                            summary = summary[:75] + "..."
+                    # 全局去重判断（简化标题对比前 12 个字）
+                    title_fingerprint = clean_title[:12].lower()
+                    if clean_title and title_fingerprint not in seen_titles:
+                        seen_titles.add(title_fingerprint)
+                        # 提纯增量摘要
+                        real_summary = extract_real_summary(raw_title, raw_summary)
                         items.append({
                             "source": source_name,
-                            "title": title,
-                            "summary": summary,
+                            "title": clean_title,
+                            "summary": real_summary,
                             "link": link
                         })
             except Exception as e:
@@ -85,7 +118,7 @@ def fetch_news(max_per_feed=2):
 
 
 def generate_detailed_summary(news_data):
-    """若配置了大模型 API，进行深度提炼；否则输出结构化高密度图文排版"""
+    """若配置了大模型 API，进行深度提炼；否则输出干净利落的精美排版"""
     gemini_key = os.getenv("GEMINI_API_KEY")
     openai_key = os.getenv("OPENAI_API_KEY")
     openai_base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -108,7 +141,7 @@ def generate_detailed_summary(news_data):
 🍿【今日吃瓜·娱乐八卦】（2 条明星名流情感纠葛或热搜吃瓜，语言风趣幽默）
 💡【主笔观察】（1 句话点出今日大势）
 
-字数限制：严格控制在 500~650 字以内，排版清爽，适合手机弹窗速读。
+字数限制：严格控制在 500~650 字以内，排版清爽，适合手机弹窗速读，杜绝任何重复语句。
 
 原始新闻素材：
 {raw_text}
@@ -148,8 +181,8 @@ def generate_detailed_summary(news_data):
         except Exception as e:
             logging.warning(f"OpenAI API 调用出错: {e}")
 
-    # 3. 兜底排版（严格控制条目数与导读长度，防止 APNs 413 超限）
-    logging.info("未配置 AI 密钥，采用自带的高密度精炼排版模式")
+    # 3. 兜底精简排版（彻底解决重复两条问题）
+    logging.info("未配置 AI 密钥，采用自带的高密度排版模式")
     lines = []
     category_icons = {
         "BBC / 纽约时报 国际深度": "📌",
@@ -162,8 +195,8 @@ def generate_detailed_summary(news_data):
         icon = category_icons.get(cat, "🔹")
         lines.append(f"{icon}【{cat}】")
         for idx, item in enumerate(items[:2], 1):  # 每个版块精选 2 条
-            title = item['title'].split(" - ")[0].strip()
-            lines.append(f"• {title}")
+            lines.append(f"• [{item['source']}] {item['title']}")
+            # 仅当有真正增量背景信息时才附带一行导读
             if item['summary']:
                 lines.append(f"  ↳ {item['summary']}")
         lines.append("")
@@ -183,7 +216,7 @@ def send_to_bark(title, body):
     # 严格限制长度不超过 900 字符，确保 Apple APNs 与 Nginx 100% 接收（避免 413）
     if len(body) > 900:
         logging.info(f"正文长度 {len(body)} 超过 900 字符，自动安全截断以防 APNs 413 拒收")
-        body = body[:890] + "...\n(更多详情见今日新闻客户端)"
+        body = body[:890] + "...\n(更多详情见今日新闻)"
 
     url = f"{bark_server.rstrip('/')}/{bark_key}/"
     payload = {
