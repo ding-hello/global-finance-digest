@@ -2,11 +2,14 @@ name: Daily Global Finance Digest
 
 on:
   schedule:
-    # 早上 07:35 (北京时间 UTC+8 -> 对应 UTC 23:35，避开整点与半点高峰)
+    # 早上 07:35 (北京时间 UTC+8 -> 对应 UTC 23:35，避开整点高峰)
     - cron: '35 23 * * *'
     # 下午 16:08 (北京时间 UTC+8 -> 对应 UTC 08:08，避开整点拥堵)
     - cron: '8 8 * * *'
   workflow_dispatch: # 支持在 GitHub 网页或 API 手动点击一键测试
+
+permissions:
+  contents: write
 
 jobs:
   digest:
@@ -25,15 +28,23 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: 执行抓取、提炼并推送到 iPhone Bark
+      - name: 执行抓取、提炼、生成大字版网页并推送到 iPhone Bark
         env:
           TZ: 'Asia/Shanghai'
           BARK_KEY: ${{ secrets.BARK_KEY }}
           BARK_SERVER: ${{ secrets.BARK_SERVER || 'https://api.day.app' }}
-          # 可选：如果配置了 AI API Key，会自动使用大模型进行深度提炼
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           MODEL_NAME: ${{ secrets.MODEL_NAME }}
         run: |
           python digest.py
+
+      - name: 部署移动端大字版网页至 GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          destination_dir: ./
+          keep_files: false
+          exclude_assets: '.git,.github,digest.py,requirements.txt,README.md'
